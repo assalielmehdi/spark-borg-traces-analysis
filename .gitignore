@@ -1,6 +1,8 @@
 .bsp/
 .idea/
 
+.DS_Store
+
 local/
 project/
 target/
