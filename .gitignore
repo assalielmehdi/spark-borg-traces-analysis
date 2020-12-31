@@ -1,0 +1,8 @@
+.bsp/
+.idea/
+
+local/
+project/
+target/
+
+key.json

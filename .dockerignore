@@ -1,0 +1,8 @@
+.bsp/
+.idea/
+
+local/
+project/
+target/
+
+README.md
