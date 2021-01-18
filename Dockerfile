@@ -1,3 +1,5 @@
+# ======== BUILD ========
+
 FROM mozilla/sbt AS BUILD_STAGE
 
 WORKDIR /app
@@ -7,6 +9,8 @@ COPY src/ src/
 COPY build.sbt build.sbt
 
 RUN sbt clean compile package
+
+# ======== DEPLOY ========
 
 FROM google/cloud-sdk:alpine
 
@@ -27,4 +31,4 @@ ENV APP_MACHINE_LOGS=gs://clusterdata-2011-2/machine_events/*.gz
 ENV APP_JOB_LOGS=gs://clusterdata-2011-2/job_events/part-00000-of-00500.csv.gz
 ENV APP_OUT_DIR=dummy
 
-ENTRYPOINT ["/entrypoint.sh"]
+#ENTRYPOINT ["/entrypoint.sh"]
