@@ -63,7 +63,11 @@ object Main {
   /**
    * Q3. On average, how many tasks compose a job?
    */
-  def computeAvgTasksPerJob(sparkSession: SparkSession, taskEventsDf: DataFrame, outPath: String): Unit = {
+  def computeAvgTasksPerJob(
+    sparkSession: SparkSession,
+    taskEventsDf: DataFrame,
+    outPath: String
+  ): Unit = {
     val tasksPerJob = taskEventsDf
       .groupBy("job_id")
       .count()
@@ -123,7 +127,11 @@ object Main {
   /**
    * Q6. In general, do tasks from the same job run on the same machine?
    */
-  def computeTasksMachineDistribution(sparkSession: SparkSession, taskEventsDf: DataFrame, outPath: String): Unit = {
+  def computeTasksMachineDistribution(
+    sparkSession: SparkSession,
+    taskEventsDf: DataFrame,
+    outPath: String
+  ): Unit = {
     val machinePerJob = taskEventsDf
       .select("job_id", "machine_id")
       .groupBy("job_id")
@@ -153,7 +161,7 @@ object Main {
     val resourcesDf = taskEventsDf
       .join(taskUsageDf, taskUsageDf("job_id") === taskEventsDf("job_id") && taskUsageDf("task_index") === taskEventsDf("task_index"))
       .select("mean_cpu_usage_rate", "resource_request_cpu_cores", "maximum_memory_usage",
-              "resource_request_ram", "mean_local_disk_s pace_used", "resource_request_local_disk_space")
+              "resource_request_ram", "mean_local_disk_space_used", "resource_request_local_disk_space")
       .where("resource_request_cpu_cores is not null and resource_request_ram is not null and resource_request_local_disk_space is not null")
 
     val cpu = resourcesDf
@@ -188,6 +196,74 @@ object Main {
       .saveAsTextFile(s"$outPath/q7")
   }
 
+  /**
+   * Q8. Is there a relation between the amount of resource consumed by tasks and their priority?
+   */
+  def computeResourceConsumptionPriorityCorrelation(
+    sparkSession: SparkSession,
+    taskEventsDf: DataFrame,
+    taskUsageDf: DataFrame,
+    outPath: String
+  ): Unit = {
+    val resourceDistributionPerPriority = taskEventsDf
+      .join(taskUsageDf, taskUsageDf("job_id") === taskEventsDf("job_id") && taskUsageDf("task_index") === taskEventsDf("task_index"))
+      .groupBy("priority")
+      .agg(
+        avg("assigned_memory_usage").as("assigned_memory_usage"),
+        avg("mean_cpu_usage_rate").as("mean_cpu_usage_rate"),
+        avg("mean_local_disk_space_used").as("mean_local_disk_space_used"),
+        )
+      .collect()
+
+    sparkSession.sparkContext
+      .makeRDD(resourceDistributionPerPriority)
+      .saveAsTextFile(s"$outPath/q8")
+  }
+
+  /**
+   * Q9. Can we observe correlations between peaks of high resource
+   * consumption on some ma-chines and task eviction events?
+   */
+  def computeTaskEvictionResourcePeakCorrelation(
+    sparkSession: SparkSession,
+    taskEventsDf: DataFrame,
+    taskUsageDf: DataFrame,
+    outPath: String
+  ): Unit = {
+    val averageUsage = taskUsageDf.agg(
+      avg("maximum_memory_usage").as("maximum_memory_usage"),
+      avg("maximum_cpu_usage").as("maximum_cpu_usage"),
+      avg("maximum_disk_io_time").as("maximum_disk_io_time"),
+      )
+
+    val evictedUsage = taskEventsDf
+      .where("event_type=2")
+      .join(taskUsageDf)
+      .where(
+        taskEventsDf("job_id") === taskUsageDf("job_id")
+          && taskEventsDf("task_index") === taskUsageDf("task_index")
+          && taskEventsDf("timestamp") >= taskUsageDf("start_time")
+          && taskEventsDf("timestamp") <= taskUsageDf("end_time")
+        )
+      .select(
+        "maximum_memory_usage",
+        "maximum_cpu_usage",
+        "maximum_disk_io_time"
+        )
+
+    val totalEvicted = evictedUsage.count()
+
+    val result = evictedUsage.schema.names.map(column => {
+      val mean = averageUsage.select(averageUsage(column)).first().getDouble(0)
+      val count = evictedUsage.filter(evictedUsage(column) > mean).count()
+      (column, count / totalEvicted)
+    })
+
+    sparkSession.sparkContext
+      .makeRDD(result)
+      .saveAsTextFile(s"$outPath/q9")
+  }
+
   def main(args: Array[String]): Unit = {
     if (args.length != 5) {
       println("Invalid arguments")
@@ -202,7 +278,7 @@ object Main {
 
     val sparkSession = SparkSession.builder
       .master("local")
-      .appName("Data Management Project")
+      .appName("LSDM 2020")
       .getOrCreate
 
     sparkSession.sparkContext
@@ -246,9 +322,9 @@ object Main {
 
     computeTaskRequestUsageCorrelation(sparkSession, taskEventsDf, taskUsageDf, outPath)
 
-    // TODO: Q8
+    computeResourceConsumptionPriorityCorrelation(sparkSession, taskEventsDf, taskUsageDf, outPath)
 
-    // TODO: Q9
+    computeTaskEvictionResourcePeakCorrelation(sparkSession, taskEventsDf, taskUsageDf, outPath)
   }
 }
 
